@@ -1,0 +1,39 @@
+## .NET
+bin/
+obj/
+out/
+[Bb]uild/
+[Bb]uild[Ll]og.*
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+*.vcxproj.user
+*.psess
+*.vsp
+*.vspx
+*.vspscc
+*.vssscc
+*.tmp
+*.log
+*.vs/
+TestResults/
+*.dbmdl
+*.pdb
+*.cache
+*.bak
+*.orig
+
+## ASP.NET Core
+project.lock.json
+project.fragment.lock.json
+artifacts/
+
+## Visual Studio
+.vs/
+.vscode/
+*.code-workspace
+*.suo
+*.user
+*.userprefs
+*.cs*

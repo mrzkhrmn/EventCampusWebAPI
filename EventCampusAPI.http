@@ -1,0 +1,6 @@
+@EventCampusAPI_HostAddress = http://192.168.1.37:5142
+
+GET {{EventCampusAPI_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
