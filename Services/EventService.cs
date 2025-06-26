@@ -1,244 +1,202 @@
-using EventCampusAPI.Data;
 using EventCampusAPI.Entities;
 using EventCampusAPI.Models;
-using Microsoft.EntityFrameworkCore;
+using EventCampusAPI.UnitOfWork;
 
 namespace EventCampusAPI.Services
 {
     public class EventService
     {
-        private readonly AppDbContext _context;
+        private readonly IUnitOfWork _unitOfWork;
 
-        public EventService(AppDbContext context)
+        public EventService(IUnitOfWork unitOfWork)
         {
-            _context = context;
+            _unitOfWork = unitOfWork;
         }
 
         public async Task<EventResponseModel> CreateEventAsync(CreateEventRequestModel model, int userId)
         {
-            // Kullanıcının üniversite bilgisini al
-            var user = await _context.Users
-                .Include(u => u.University)
-                .Include(u => u.Faculty)
-                .Include(u => u.Department)
-                .FirstOrDefaultAsync(u => u.Id == userId);
-
-            if (user?.UniversityId == null)
-                throw new InvalidOperationException("Etkinlik oluşturmak için üniversite bilginiz olmalı");
-
-            // Kategori kontrolü
-            var category = await _context.Categories.FindAsync(model.CategoryId);
-            if (category == null)
-                throw new ArgumentException("Geçersiz kategori seçimi");
-
-            var eventEntity = new Event
+            try
             {
-                Name = model.Name,
-                StartDate = model.StartDate,
-                EndDate = model.EndDate,
-                StartTime = model.StartTime.TimeOfDay,
-                EndTime = model.EndTime.TimeOfDay,
-                Description = model.Description,
-                EventImages = model.EventImages ?? new List<string> { "https://picsum.photos/200/300" },
-                Latitude = model.Latitude,
-                Longitude = model.Longitude,
-                Address = model.Address,
-                IsFree = model.IsFree,
-                Price = model.Price,
-                MaxParticipants = model.MaxParticipants,
-                CategoryId = model.CategoryId,
-                CreatedByUserId = userId,
-                UniversityId = user.UniversityId.Value,
-                IsPublic = model.IsPublic,
-                CreatedAt = DateTime.UtcNow
-            };
+                await _unitOfWork.BeginTransactionAsync();
 
-            _context.Events.Add(eventEntity);
-            await _context.SaveChangesAsync();
+                // Kullanıcının üniversite bilgisini al
+                var user = await _unitOfWork.Users.GetUserWithFullDetailsAsync(userId);
+                if (user?.UniversityId == null)
+                    throw new InvalidOperationException("Etkinlik oluşturmak için üniversite bilginiz olmalı");
 
-            // Etkinlik oluşturan kişiyi otomatik olarak katılımcı olarak ekle
-            var participation = new EventParticipant
+                // Kategori kontrolü
+                var category = await _unitOfWork.Categories.GetByIdAsync(model.CategoryId);
+                if (category == null)
+                    throw new ArgumentException("Geçersiz kategori seçimi");
+
+                var eventEntity = new Event
+                {
+                    Name = model.Name,
+                    StartDate = model.StartDate,
+                    EndDate = model.EndDate,
+                    StartTime = model.StartTime.TimeOfDay,
+                    EndTime = model.EndTime.TimeOfDay,
+                    Description = model.Description,
+                    EventImages = model.EventImages ?? new List<string> { "https://picsum.photos/200/300" },
+                    Latitude = model.Latitude,
+                    Longitude = model.Longitude,
+                    Address = model.Address,
+                    IsFree = model.IsFree,
+                    Price = model.Price,
+                    MaxParticipants = model.MaxParticipants,
+                    CategoryId = model.CategoryId,
+                    CreatedByUserId = userId,
+                    UniversityId = user.UniversityId.Value,
+                    IsPublic = model.IsPublic,
+                    CreatedAt = DateTime.UtcNow
+                };
+
+                await _unitOfWork.Events.AddAsync(eventEntity);
+                await _unitOfWork.SaveChangesAsync();
+
+                var participation = new EventParticipant
+                {
+                    EventId = eventEntity.Id,
+                    UserId = userId,
+                    JoinedAt = DateTime.UtcNow,
+                    IsConfirmed = true
+                };
+
+                await _unitOfWork.EventParticipants.AddAsync(participation);
+                await _unitOfWork.SaveChangesAsync();
+                await _unitOfWork.CommitTransactionAsync();
+
+                return await GetEventByIdAsync(eventEntity.Id, userId);
+            }
+            catch
             {
-                EventId = eventEntity.Id,
-                UserId = userId,
-                JoinedAt = DateTime.UtcNow,
-                IsConfirmed = true
-            };
-
-            _context.EventParticipants.Add(participation);
-            await _context.SaveChangesAsync();
-
-            return await GetEventByIdAsync(eventEntity.Id, userId);
+                if (_unitOfWork.HasActiveTransaction)
+                    await _unitOfWork.RollbackTransactionAsync();
+                throw;
+            }
         }
 
         public async Task<List<EventResponseModel>> GetEventsForUserAsync(int userId, int? categoryId = null, int page = 1, int pageSize = 10)
         {
-            // Kullanıcının üniversite bilgisini al
-            var user = await _context.Users
-                .Include(u => u.University)
-                .FirstOrDefaultAsync(u => u.Id == userId);
-
+            var user = await _unitOfWork.Users.GetUserWithUniversityAsync(userId);
             if (user?.UniversityId == null)
                 return new List<EventResponseModel>();
 
-            var query = _context.Events
-                .Include(e => e.Category)
-                .Include(e => e.CreatedByUser)
-                    .ThenInclude(u => u.University)
-                .Include(e => e.CreatedByUser)
-                    .ThenInclude(u => u.Faculty)
-                .Include(e => e.CreatedByUser)
-                    .ThenInclude(u => u.Department)
-                .Include(e => e.University)
-                .Include(e => e.Participants)
-                    .ThenInclude(p => p.User)
-                        .ThenInclude(u => u.University)
-                .Include(e => e.Participants)
-                    .ThenInclude(p => p.User)
-                        .ThenInclude(u => u.Faculty)
-                .Include(e => e.Participants)
-                    .ThenInclude(p => p.User)
-                        .ThenInclude(u => u.Department)
-                .Where(e => e.IsActive && e.UniversityId == user.UniversityId)
-                // Kullanıcının katılmadığı eventleri filtrele
-                .Where(e => !e.Participants.Any(p => p.UserId == userId && p.IsConfirmed));
+            var events = await _unitOfWork.Events.GetEventsForUniversityAsync(
+                user.UniversityId.Value, categoryId, page, pageSize);
 
-            // Kategori filtresi varsa uygula
-            if (categoryId.HasValue && categoryId.Value > 0)
+            var filteredEvents = new List<Event>();
+            foreach (var eventItem in events)
             {
-                query = query.Where(e => e.CategoryId == categoryId.Value);
+                var isParticipant = await _unitOfWork.EventParticipants.IsUserParticipantAsync(eventItem.Id, userId);
+                if (!isParticipant)
+                {
+                    filteredEvents.Add(eventItem);
+                }
             }
 
-            query = query.OrderByDescending(e => e.CreatedAt)
-                        .Skip((page - 1) * pageSize)
-                        .Take(pageSize)
-                        .AsNoTracking(); // Tracking'i kapat, güncel veriyi çek
-
-            var events = await query.ToListAsync();
-
-            return events.Select(e => MapToResponseModel(e, userId)).ToList();
+            return filteredEvents.Select(e => MapToResponseModel(e, userId)).ToList();
         }
 
         public async Task<EventResponseModel?> GetEventByIdAsync(int eventId, int userId)
         {
-            var user = await _context.Users.FindAsync(userId);
+            var user = await _unitOfWork.Users.GetByIdAsync(userId);
             if (user?.UniversityId == null)
                 return null;
 
-            var eventEntity = await _context.Events
-                .Include(e => e.Category)
-                .Include(e => e.CreatedByUser)
-                    .ThenInclude(u => u.University)
-                .Include(e => e.CreatedByUser)
-                    .ThenInclude(u => u.Faculty)
-                .Include(e => e.CreatedByUser)
-                    .ThenInclude(u => u.Department)
-                .Include(e => e.University)
-                .Include(e => e.Participants)
-                    .ThenInclude(p => p.User)
-                        .ThenInclude(u => u.University)
-                .Include(e => e.Participants)
-                    .ThenInclude(p => p.User)
-                        .ThenInclude(u => u.Faculty)
-                .Include(e => e.Participants)
-                    .ThenInclude(p => p.User)
-                        .ThenInclude(u => u.Department)
-                .Where(e => e.Id == eventId && e.UniversityId == user.UniversityId)
-                .FirstOrDefaultAsync();
+            var eventEntity = await _unitOfWork.Events.GetEventWithDetailsAsync(eventId);
+            if (eventEntity == null || eventEntity.UniversityId != user.UniversityId)
+                return null;
 
-            return eventEntity != null ? MapToResponseModel(eventEntity, userId) : null;
+            return MapToResponseModel(eventEntity, userId);
         }
 
         public async Task<(bool Success, string Message)> JoinEventAsync(int eventId, int userId)
         {
-            var user = await _context.Users.FindAsync(userId);
-            if (user?.UniversityId == null)
-                return (false, "Etkinliğe katılmak için üniversite bilginiz olmalı");
-
-            var eventEntity = await _context.Events
-                .Include(e => e.Participants)
-                .Where(e => e.Id == eventId && e.UniversityId == user.UniversityId)
-                .FirstOrDefaultAsync();
-
-            if (eventEntity == null)
-                return (false, "Etkinlik bulunamadı veya farklı üniversiteye ait");
-
-            if (!eventEntity.IsRegistrationOpen)
+            try
             {
-                if (eventEntity.IsEventStarted)
-                    return (false, "Etkinlik başlamış, kayıt alımı kapanmış");
-                if (eventEntity.MaxParticipants != null && eventEntity.CurrentParticipantCount >= eventEntity.MaxParticipants)
-                    return (false, "Etkinlik kontenjanı dolmuş");
-                if (!eventEntity.IsActive)
-                    return (false, "Etkinlik aktif değil");
+                await _unitOfWork.BeginTransactionAsync();
+
+                var user = await _unitOfWork.Users.GetByIdAsync(userId);
+                if (user?.UniversityId == null)
+                    return (false, "Etkinliğe katılmak için üniversite bilginiz olmalı");
+
+                var eventEntity = await _unitOfWork.Events.GetEventWithDetailsAsync(eventId);
+                if (eventEntity == null || eventEntity.UniversityId != user.UniversityId)
+                    return (false, "Etkinlik bulunamadı veya farklı üniversiteye ait");
+
+                if (!eventEntity.IsRegistrationOpen)
+                {
+                    if (eventEntity.IsEventStarted)
+                        return (false, "Etkinlik başlamış, kayıt alımı kapanmış");
                     
-                return (false, "Etkinlik kayıt alımına kapalı");
+                    var participantCount = await _unitOfWork.EventParticipants.GetEventParticipantCountAsync(eventId);
+                    if (eventEntity.MaxParticipants != null && participantCount >= eventEntity.MaxParticipants)
+                        return (false, "Etkinlik kontenjanı dolmuş");
+                    
+                    if (!eventEntity.IsActive)
+                        return (false, "Etkinlik aktif değil");
+                        
+                    return (false, "Etkinlik kayıt alımına kapalı");
+                }
+
+                var existingParticipation = await _unitOfWork.EventParticipants.GetParticipationAsync(eventId, userId);
+                if (existingParticipation != null)
+                    return (false, "Bu etkinliğe zaten katılmışsınız");
+
+                var participation = new EventParticipant
+                {
+                    EventId = eventId,
+                    UserId = userId,
+                    JoinedAt = DateTime.UtcNow,
+                    IsConfirmed = true
+                };
+
+                await _unitOfWork.EventParticipants.AddAsync(participation);
+                await _unitOfWork.SaveChangesAsync();
+                await _unitOfWork.CommitTransactionAsync();
+
+                return (true, "Etkinliğe başarıyla katıldınız");
             }
-
-            // Kullanıcı zaten katılmış mı kontrol et
-            var existingParticipation = await _context.EventParticipants
-                .FirstOrDefaultAsync(ep => ep.EventId == eventId && ep.UserId == userId);
-
-            if (existingParticipation != null)
-                return (false, "Bu etkinliğe zaten katılmışsınız");
-
-            var participation = new EventParticipant
+            catch
             {
-                EventId = eventId,
-                UserId = userId,
-                JoinedAt = DateTime.UtcNow,
-                IsConfirmed = true
-            };
-
-            _context.EventParticipants.Add(participation);
-            await _context.SaveChangesAsync();
-
-            return (true, "Etkinliğe başarıyla katıldınız");
+                if (_unitOfWork.HasActiveTransaction)
+                    await _unitOfWork.RollbackTransactionAsync();
+                throw;
+            }
         }
 
         public async Task<bool> LeaveEventAsync(int eventId, int userId)
         {
-            var participation = await _context.EventParticipants
-                .FirstOrDefaultAsync(ep => ep.EventId == eventId && ep.UserId == userId);
+            try
+            {
+                await _unitOfWork.BeginTransactionAsync();
 
-            if (participation == null)
-                return false;
+                var participation = await _unitOfWork.EventParticipants.GetParticipationAsync(eventId, userId);
+                if (participation == null)
+                    return false;
 
-            _context.EventParticipants.Remove(participation);
-            await _context.SaveChangesAsync();
+                _unitOfWork.EventParticipants.Remove(participation);
+                await _unitOfWork.SaveChangesAsync();
+                await _unitOfWork.CommitTransactionAsync();
 
-            return true;
+                return true;
+            }
+            catch
+            {
+                if (_unitOfWork.HasActiveTransaction)
+                    await _unitOfWork.RollbackTransactionAsync();
+                throw;
+            }
         }
 
         public async Task<List<EventResponseModel>> GetUserParticipatedEventsAsync(int userId, int page = 1, int pageSize = 10)
         {
-            // Kullanıcının üniversite bilgisini al
-            var user = await _context.Users
-                .Include(u => u.University)
-                .FirstOrDefaultAsync(u => u.Id == userId);
-
+            var user = await _unitOfWork.Users.GetUserWithUniversityAsync(userId);
             if (user?.UniversityId == null)
                 return new List<EventResponseModel>();
 
-            var query = _context.Events
-                .Include(e => e.Category)
-                .Include(e => e.CreatedByUser)
-                    .ThenInclude(u => u.University)
-                .Include(e => e.CreatedByUser)
-                    .ThenInclude(u => u.Faculty)
-                .Include(e => e.CreatedByUser)
-                    .ThenInclude(u => u.Department)
-                .Include(e => e.University)
-                .Include(e => e.Participants)
-                .Where(e => e.IsActive && e.UniversityId == user.UniversityId)
-                // Sadece kullanıcının katıldığı eventleri getir
-                .Where(e => e.Participants.Any(p => p.UserId == userId && p.IsConfirmed))
-                .OrderByDescending(e => e.CreatedAt)
-                .Skip((page - 1) * pageSize)
-                .Take(pageSize);
-
-            var events = await query.ToListAsync();
-
+            var events = await _unitOfWork.Events.GetUserParticipatedEventsAsync(userId, page, pageSize);
             return events.Select(e => MapToResponseModel(e, userId)).ToList();
         }
 

@@ -52,11 +52,9 @@ namespace EventCampusAPI.Controller
         [HttpPost("CreateUser")]
         public async Task<IActionResult> CreateUser([FromBody] RegisterRequestModel request)
         {
-            // Email kontrolü
             if (await _context.Users.AnyAsync(u => u.Email == request.Email))
                 return BadRequest(new { userData = "Bu email adresi zaten kullanılıyor." });
 
-            // Üniversite kontrolü
             University? university = null;
             if (request.UniversityId.HasValue)
             {
@@ -65,7 +63,6 @@ namespace EventCampusAPI.Controller
                     return BadRequest(new { userData = "Geçersiz üniversite seçimi." });
             }
 
-            // Fakulte kontrolü
             Faculty? faculty = null;
             if (request.FacultyId.HasValue)
             {
@@ -77,7 +74,6 @@ namespace EventCampusAPI.Controller
                     return BadRequest(new { userData = "Seçilen fakülte, seçilen üniversiteye ait değil." });
             }
 
-            // Bölüm kontrolü
             Department? department = null;
             if (request.DepartmentId.HasValue)
             {
@@ -94,7 +90,7 @@ namespace EventCampusAPI.Controller
                 Email = request.Email,
                 Name = request.Name,
                 Surname = request.Surname,
-                Password = request.Password, // Gerçek uygulamada hash'leyin!
+                Password = request.Password, 
                 UniversityId = request.UniversityId,
                 FacultyId = request.FacultyId,
                 DepartmentId = request.DepartmentId,
@@ -134,7 +130,6 @@ namespace EventCampusAPI.Controller
 
                 var userCount = users.Count;
 
-                // Önce kullanıcıların katıldığı event kayıtlarını sil (EventParticipants)
                 var participations = await _context.EventParticipants
                     .Where(ep => users.Select(u => u.Id).Contains(ep.UserId))
                     .ToListAsync();
@@ -145,7 +140,6 @@ namespace EventCampusAPI.Controller
                     await _context.SaveChangesAsync();
                 }
 
-                // Sonra kullanıcıların oluşturduğu eventleri sil
                 var createdEvents = await _context.Events
                     .Where(e => users.Select(u => u.Id).Contains(e.CreatedByUserId))
                     .ToListAsync();
@@ -156,7 +150,6 @@ namespace EventCampusAPI.Controller
                     await _context.SaveChangesAsync();
                 }
 
-                // En son kullanıcıları sil
                 _context.Users.RemoveRange(users);
                 await _context.SaveChangesAsync();
 
@@ -174,43 +167,35 @@ namespace EventCampusAPI.Controller
             if (await _context.Users.AnyAsync())
                 return BadRequest(new { userData = "Kullanıcılar zaten mevcut." });
 
-            // Önce üniversitelerin var olduğundan emin olalım
             var universities = await _context.Universities.ToListAsync();
             if (!universities.Any())
                 return BadRequest(new { userData = "Önce üniversiteler oluşturulmalı." });
 
-            // Fakülte verilerini de alalım
             var faculties = await _context.Faculties.Include(f => f.University).ToListAsync();
             if (!faculties.Any())
                 return BadRequest(new { userData = "Önce fakülteler oluşturulmalı. /api/Faculty/seed endpoint'ini kullanın." });
 
-            // Bölüm verilerini de alalım
             var departments = await _context.Departments.Include(d => d.Faculty).ToListAsync();
             if (!departments.Any())
                 return BadRequest(new { userData = "Önce bölümler oluşturulmalı. /api/Department/seed endpoint'ini kullanın." });
 
-            // İTÜ fakülte ve bölümlerini bulalım
             var ituUniversity = universities.FirstOrDefault(u => u.ShortName == "İTÜ");
             var ituEngFaculty = faculties.FirstOrDefault(f => f.UniversityId == ituUniversity?.Id && f.Name == "Mühendislik Fakültesi");
             var ituCompEngDept = departments.FirstOrDefault(d => d.FacultyId == ituEngFaculty?.Id && d.Name == "Bilgisayar Mühendisliği");
             var ituSoftEngDept = departments.FirstOrDefault(d => d.FacultyId == ituEngFaculty?.Id && d.Name == "Yazılım Mühendisliği");
 
-            // BOĞAZI ÜNI fakülte ve bölümlerini bulalım
             var bounUniversity = universities.FirstOrDefault(u => u.ShortName == "BOÜN");
             var bounEngFaculty = faculties.FirstOrDefault(f => f.UniversityId == bounUniversity?.Id && f.Name == "Mühendislik Fakültesi");
             var bounCompEngDept = departments.FirstOrDefault(d => d.FacultyId == bounEngFaculty?.Id && d.Name == "Bilgisayar Mühendisliği");
 
-            // ODTÜ fakülte ve bölümlerini bulalım
             var odtuUniversity = universities.FirstOrDefault(u => u.ShortName == "ODTÜ");
             var odtuEngFaculty = faculties.FirstOrDefault(f => f.UniversityId == odtuUniversity?.Id && f.Name == "Mühendislik Fakültesi");
             var odtuCompEngDept = departments.FirstOrDefault(d => d.FacultyId == odtuEngFaculty?.Id && d.Name == "Bilgisayar Mühendisliği");
 
-            // BİLKENT fakülte ve bölümlerini bulalım
             var bilkentUniversity = universities.FirstOrDefault(u => u.ShortName == "BİLKENT");
             var bilkentEngFaculty = faculties.FirstOrDefault(f => f.UniversityId == bilkentUniversity?.Id && f.Name == "Mühendislik Fakültesi");
             var bilkentCompEngDept = departments.FirstOrDefault(d => d.FacultyId == bilkentEngFaculty?.Id && d.Name == "Bilgisayar Mühendisliği");
-
-            // SABANCI ÜNI fakülte ve bölümlerini bulalım
+            
             var sabancıUniversity = universities.FirstOrDefault(u => u.ShortName == "SU");
             var sabancıEngFaculty = faculties.FirstOrDefault(f => f.UniversityId == sabancıUniversity?.Id && f.Name == "Mühendislik Fakültesi");
             var sabancıCompEngDept = departments.FirstOrDefault(d => d.FacultyId == sabancıEngFaculty?.Id && d.Name == "Bilgisayar Mühendisliği");

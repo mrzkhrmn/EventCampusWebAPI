@@ -1,9 +1,8 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using EventCampusAPI.Data;
 using EventCampusAPI.Entities;
 using EventCampusAPI.Models;
-using Microsoft.EntityFrameworkCore;
+using EventCampusAPI.UnitOfWork;
 
 namespace EventCampusAPI.Controller
 {
@@ -11,11 +10,11 @@ namespace EventCampusAPI.Controller
     [Route("api/[controller]")]
     public class CategoryController : ControllerBase
     {
-        private readonly AppDbContext _context;
+        private readonly IUnitOfWork _unitOfWork;
 
-        public CategoryController(AppDbContext context)
+        public CategoryController(IUnitOfWork unitOfWork)
         {
-            _context = context;
+            _unitOfWork = unitOfWork;
         }
 
         [HttpGet("GetAll")]
@@ -24,7 +23,7 @@ namespace EventCampusAPI.Controller
         {
             try
             {
-                var categories = await _context.Categories.ToListAsync();
+                var categories = await _unitOfWork.Categories.GetActiveCategoriesAsync();
                 var categoryResponse = categories.Select(c => new CategoryResponseModel
                 {
                     Id = c.Id,
@@ -50,7 +49,7 @@ namespace EventCampusAPI.Controller
         {
             try
             {
-                var category = await _context.Categories.FindAsync(id);
+                var category = await _unitOfWork.Categories.GetByIdAsync(id);
                 if (category == null)
                 {
                     return NotFound(new { success = false, message = "Kategori bulunamadı" });
@@ -77,11 +76,13 @@ namespace EventCampusAPI.Controller
         }
 
         [HttpPost]
-        [Authorize] // Sadece giriş yapan kullanıcılar kategori ekleyebilir
+        [Authorize] 
         public async Task<IActionResult> CreateCategory([FromBody] CreateCategoryRequestModel model)
         {
             try
             {
+                await _unitOfWork.BeginTransactionAsync();
+
                 var category = new Category
                 {
                     Name = model.Name,
@@ -89,8 +90,9 @@ namespace EventCampusAPI.Controller
                     Description = model.Description
                 };
 
-                _context.Categories.Add(category);
-                await _context.SaveChangesAsync();
+                await _unitOfWork.Categories.AddAsync(category);
+                await _unitOfWork.SaveChangesAsync();
+                await _unitOfWork.CommitTransactionAsync();
 
                 var categoryResponse = new CategoryResponseModel
                 {
@@ -108,17 +110,21 @@ namespace EventCampusAPI.Controller
             }
             catch (Exception ex)
             {
+                if (_unitOfWork.HasActiveTransaction)
+                    await _unitOfWork.RollbackTransactionAsync();
                 return StatusCode(500, new { success = false, message = "Bir hata oluştu: " + ex.Message });
             }
         }
 
         [HttpPut("{id}")]
-        [Authorize] // Sadece giriş yapan kullanıcılar kategori düzenleyebilir
+        [Authorize] 
         public async Task<IActionResult> UpdateCategory(int id, [FromBody] UpdateCategoryRequestModel model)
         {
             try
             {
-                var category = await _context.Categories.FindAsync(id);
+                await _unitOfWork.BeginTransactionAsync();
+
+                var category = await _unitOfWork.Categories.GetByIdAsync(id);
                 if (category == null)
                 {
                     return NotFound(new { success = false, message = "Kategori bulunamadı" });
@@ -128,7 +134,9 @@ namespace EventCampusAPI.Controller
                 category.Icon = model.Icon;
                 category.Description = model.Description;
 
-                await _context.SaveChangesAsync();
+                _unitOfWork.Categories.Update(category);
+                await _unitOfWork.SaveChangesAsync();
+                await _unitOfWork.CommitTransactionAsync();
 
                 var categoryResponse = new CategoryResponseModel
                 {
@@ -146,26 +154,26 @@ namespace EventCampusAPI.Controller
             }
             catch (Exception ex)
             {
+                if (_unitOfWork.HasActiveTransaction)
+                    await _unitOfWork.RollbackTransactionAsync();
                 return StatusCode(500, new { success = false, message = "Bir hata oluştu: " + ex.Message });
             }
         }
 
         [HttpDelete("{id}")]
-        [Authorize] // Sadece giriş yapan kullanıcılar kategori silebilir
+        [Authorize] 
         public async Task<IActionResult> DeleteCategory(int id)
         {
             try
             {
-                var category = await _context.Categories
-                    .Include(c => c.Events)
-                    .FirstOrDefaultAsync(c => c.Id == id);
+                await _unitOfWork.BeginTransactionAsync();
 
+                var category = await _unitOfWork.Categories.GetCategoryWithEventsAsync(id);
                 if (category == null)
                 {
                     return NotFound(new { success = false, message = "Kategori bulunamadı" });
                 }
 
-                // Kategoriye ait etkinlik varsa silme
                 if (category.Events.Any())
                 {
                     return BadRequest(new { 
@@ -174,8 +182,9 @@ namespace EventCampusAPI.Controller
                     });
                 }
 
-                _context.Categories.Remove(category);
-                await _context.SaveChangesAsync();
+                _unitOfWork.Categories.Remove(category);
+                await _unitOfWork.SaveChangesAsync();
+                await _unitOfWork.CommitTransactionAsync();
 
                 return Ok(new { 
                     success = true, 
@@ -184,6 +193,8 @@ namespace EventCampusAPI.Controller
             }
             catch (Exception ex)
             {
+                if (_unitOfWork.HasActiveTransaction)
+                    await _unitOfWork.RollbackTransactionAsync();
                 return StatusCode(500, new { success = false, message = "Bir hata oluştu: " + ex.Message });
             }
         }
@@ -193,8 +204,10 @@ namespace EventCampusAPI.Controller
         {
             try
             {
-                // Zaten kategori varsa seed etme
-                if (await _context.Categories.AnyAsync())
+                await _unitOfWork.BeginTransactionAsync();
+        
+                var existingCategories = await _unitOfWork.Categories.GetAllAsync();
+                if (existingCategories.Any())
                 {
                     return BadRequest(new { 
                         success = false, 
@@ -216,8 +229,9 @@ namespace EventCampusAPI.Controller
                     new Category { Name = "Diğer", Icon = "📝", Description = "Diğer etkinlikler" }
                 };
 
-                _context.Categories.AddRange(categories);
-                await _context.SaveChangesAsync();
+                await _unitOfWork.Categories.AddRangeAsync(categories);
+                await _unitOfWork.SaveChangesAsync();
+                await _unitOfWork.CommitTransactionAsync();
 
                 return Ok(new { 
                     success = true, 
@@ -226,6 +240,8 @@ namespace EventCampusAPI.Controller
             }
             catch (Exception ex)
             {
+                if (_unitOfWork.HasActiveTransaction)
+                    await _unitOfWork.RollbackTransactionAsync();
                 return StatusCode(500, new { success = false, message = "Bir hata oluştu: " + ex.Message });
             }
         }

@@ -79,14 +79,12 @@ public class DepartmentController : ControllerBase
     {
         try
         {
-            // Önce mevcut bölümleri kontrol et
             var existingDepartments = await _context.Departments.CountAsync();
             if (existingDepartments > 0)
             {
                 return BadRequest("Bölümler zaten mevcut. Önce mevcut verileri temizleyin.");
             }
-
-            // Fakülteleri getir
+        
             var faculties = await _context.Faculties.ToListAsync();
             if (!faculties.Any())
             {

@@ -73,14 +73,12 @@ public class FacultyController : ControllerBase
     {
         try
         {
-            // Önce mevcut fakülteleri kontrol et
             var existingFaculties = await _context.Faculties.CountAsync();
             if (existingFaculties > 0)
             {
                 return BadRequest("Fakülteler zaten mevcut. Önce mevcut verileri temizleyin.");
             }
 
-            // Üniversiteleri getir
             var universities = await _context.Universities.ToListAsync();
             if (!universities.Any())
             {
@@ -89,7 +87,6 @@ public class FacultyController : ControllerBase
 
             var faculties = new List<Faculty>();
 
-            // Her üniversite için örnek fakülteler
             foreach (var university in universities)
             {
                 faculties.AddRange(new List<Faculty>

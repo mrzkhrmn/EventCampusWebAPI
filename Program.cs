@@ -9,6 +9,8 @@ using EventCampusAPI.Models;
 using EventCampusAPI.Validators;
 using EventCampusAPI.Middlewares;
 using EventCampusAPI.Services;
+using EventCampusAPI.Repositories;
+using EventCampusAPI.UnitOfWork;
 using System.Text;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -92,8 +94,21 @@ builder.Services.AddFluentValidationClientsideAdapters();
 
 builder.Services.AddControllers();
 
+// Repository Pattern & Unit of Work
+builder.Services.AddScoped<IUnitOfWork, UnitOfWork>();
+
+// Repository Services
+builder.Services.AddScoped<IUserRepository, UserRepository>();
+builder.Services.AddScoped<IEventRepository, EventRepository>();
+builder.Services.AddScoped<IEventParticipantRepository, EventParticipantRepository>();
+builder.Services.AddScoped<ICategoryRepository, CategoryRepository>();
+builder.Services.AddScoped<IUniversityRepository, UniversityRepository>();
+builder.Services.AddScoped<IFacultyRepository, FacultyRepository>();
+builder.Services.AddScoped<IDepartmentRepository, DepartmentRepository>();
+
 // Services
 builder.Services.AddScoped<EventService>();
+builder.Services.AddScoped<TokenService>();
 
 // Validators
 builder.Services.AddScoped<IValidator<RegisterRequestModel>, RegisterRequestModelValidator>();
